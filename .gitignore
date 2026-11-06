@@ -1,0 +1,26 @@
+# Android & Gradle build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Local environment & signing configs
+local.properties
+*.jks
+*.keystore
+
+# IDE & OS artifacts
+*.iml
+.idea/
+.navigation/
+.DS_Store
+Thumbs.db
+
+# Local helper scripts
+generate_pioka_logo.py

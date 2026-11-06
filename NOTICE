@@ -1,0 +1,32 @@
+Leaf Flasher
+Copyright 2026 sid_imp
+
+This software includes or draws architectural inspiration from the following
+open-source projects and libraries:
+
+- otaripper (https://github.com/syedinsaf/otaripper)
+  Licensed under the Apache License, Version 2.0.
+  Used as architectural reference for zero-copy OTA payload.bin parsing and
+  parallel partition image extraction in PayloadDumper.
+
+- Android Open Source Project (AOSP) Platform Tools
+  (https://android.googlesource.com/platform/system/core/)
+  Licensed under the Apache License, Version 2.0.
+  Protocol specifications for Fastboot / FastbootD, Android Sparse images,
+  AVB 2.0 vbmeta header flags, and ADB USB wire / sideload framing.
+
+- Apache Commons Compress (https://github.com/apache/commons-compress)
+  Licensed under the Apache License, Version 2.0.
+
+- Tukaani XZ for Java (https://github.com/tukaani-project/xz-java)
+  Released into the Public Domain / BSD Zero Clause License (0BSD).
+
+- Zstd-jni (https://github.com/luben/zstd-jni)
+  Licensed under the BSD 2-Clause / BSD 3-Clause License.
+
+- Jetpack Compose, AndroidX Libraries & Kotlin Coroutines
+  Licensed under the Apache License, Version 2.0.
+
+- Nunito Font Family (https://github.com/googlefonts/nunito)
+  Bundled under app/src/main/res/font/ and licensed under the
+  SIL Open Font License 1.1.
