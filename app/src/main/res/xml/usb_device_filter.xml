@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Strict Android Fastboot (Bootloader & Fastbootd: 255/66/3) and ADB / Recovery Sideload (255/66/1) -->
+    <!-- Excludes MediaTek BROM (0E8D:0003), Preloader (0E8D:2000 / CDC), MTP, etc. -->
+    <usb-device class="255" subclass="66" protocol="3" />
+    <usb-device class="255" subclass="66" protocol="1" />
+</resources>
