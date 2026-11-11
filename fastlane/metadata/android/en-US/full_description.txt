@@ -1,0 +1,19 @@
+Leaf Flasher turns your Android phone into a portable flashing tool over a USB OTG cable, so you can flash ROMs, kernels, recoveries, and add-on packages on a second device without needing a laptop or desktop PC.
+
+Key features:
+- Automatic USB OTG detection for Bootloader (Fastboot), FastbootD, Android ADB, Recovery ADB, and Recovery ADB Sideload, while ignoring MediaTek BROM/Preloader and MTP interfaces.
+- Unified ROM browser supporting Phone Storage, Downloads, external SD Card volumes, and Android's system file/folder picker (SAF).
+- Built-in parallel payload.bin extractor supporting uncompressed OTA packages without duplicating payload.bin on disk, handling XZ, BZip2, ZSTD, raw, and zero/discard operations with real-time per-worker speed bars.
+- Step-by-step guided flash setup for active slot (A, B, or A+B), clean vs dirty wipe, extra replacement images (such as patched Magisk/KernelSU boot or super_empty.img), and dm-verity / vbmeta verification options for Port ROMs and GSIs.
+- Distraction-free flashing progress screen with pause, resume, cancel, transfer speeds, and scrollable logs.
+- Dedicated Partition tab for single .img flashing with auto-segmentation for large sparse files.
+- Dedicated Sideload tab implementing native USB ADB and sideload-host streaming for GApps, Magisk, KernelSU, and recovery OTA packages without needing USB debugging prompts in recovery.
+- Tools tab with custom Fastboot/ADB command runner, reboot shortcuts, slot switcher, and userdata format control.
+- Built-in walkthrough and per-tile info popups written in plain language.
+
+Requirements:
+- Host device running Android 7.0+ with USB OTG hardware support.
+- Data-capable USB OTG adapter/cable or USB-C to USB-C data cable.
+- Target device with unlocked bootloader for Fastboot/FastbootD flashing.
+
+Licensed under Apache-2.0. Contact on Telegram: @sid_imp
