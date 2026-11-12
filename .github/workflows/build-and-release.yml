@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout Source Tree
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set Up JDK 17
         uses: actions/setup-java@v4
@@ -116,19 +118,48 @@ jobs:
           echo "TAG_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
           echo "APK_NAME=${APK_NAME}" >> "$GITHUB_ENV"
 
-          printf '%s\n' \
-            "## Leaf Flasher by \`sid_imp\`" \
-            "" \
-            "Android-to-Android USB OTG Fastboot, FastbootD, OTA \`payload.bin\`, and ADB Sideload flasher for flashing ROMs, kernels, recoveries, and add-on ZIPs directly from another phone without a PC." \
-            "" \
-            "### Release Files" \
-            "- \`${APK_NAME}\`" \
-            "- \`${APK_NAME}.sha256\` (\`${APK_SHA256}\`)" \
-            "" \
-            "### Links" \
-            "- Feature guide & build instructions: [README](https://github.com/${GITHUB_REPOSITORY}#readme)" \
-            "- Telegram: [@sid_imp](https://t.me/sid_imp)" \
-            > dist/release-body.md
+          VERSION_CODE=$(grep -m1 'versionCode' app/build.gradle.kts | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          TAG_NOTES=""
+          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            TAG_NOTES=$(git tag -l --format='%(contents:body)' "${TAG_NAME}" | sed '/^[[:space:]]*$/d' || true)
+          fi
+          if [ -z "${TAG_NOTES}" ]; then
+            PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | grep -v "^${TAG_NAME}\$" | head -n1 || true)
+            if [ -n "${PREV_TAG}" ]; then
+              TAG_NOTES=$(git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:'- %s' || true)
+            fi
+          fi
+          if [ -z "${TAG_NOTES}" ]; then
+            TAG_NOTES="- $(git log -1 --pretty=format:'%s')"
+          fi
+
+          {
+            echo '<div align="center">'
+            echo ''
+            echo "<img src=\"https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/fastlane/metadata/android/en-US/images/featureGraphic.png\" alt=\"Leaf Flasher Banner\" width=\"760\" />"
+            echo ''
+            echo '</div>'
+            echo ''
+            echo "## <img src=\"https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/fastlane/metadata/android/en-US/images/icon.png\" width=\"28\" height=\"28\" alt=\"Leaf Flasher\" /> Leaf Flasher \`${TAG_NAME}\` by \`sid_imp\`"
+            echo ''
+            echo 'Android-to-Android USB OTG Fastboot, FastbootD, OTA `payload.bin`, and ADB Sideload flasher for flashing ROMs, extracting partition `.img` files, and sideloading recovery ZIPs without a PC.'
+            echo ''
+            echo "### What's New in ${TAG_NAME}"
+            printf '%s\n' "${TAG_NOTES}"
+            echo ''
+            echo '### Release Files'
+            echo "- **APK:** \`${APK_NAME}\` (\`versionCode ${VERSION_CODE}\`)"
+            echo "- **SHA-256:** \`${APK_SHA256}\`"
+            echo ''
+            echo '```bash'
+            echo "sha256sum -c ${APK_NAME}.sha256"
+            echo '```'
+            echo ''
+            echo '### Links'
+            echo "- Feature guide & build instructions: [README](https://github.com/${GITHUB_REPOSITORY}#readme)"
+            echo '- F-Droid Request for Packaging: [fdroid/rfp#4779](https://gitlab.com/fdroid/rfp/-/work_items/4779)'
+            echo '- Telegram: [@sid_imp](https://t.me/sid_imp)'
+          } > dist/release-body.md
 
       - name: Upload CI Build Artifacts
         uses: actions/upload-artifact@v4
