@@ -786,7 +786,7 @@ class FlashScriptParserTest {
     @Test
     fun testFeatureGuideAndTutorCompleteness() {
         val entries = com.sid_imp.leaf.ui.FeatureInfoKey.entries
-        assertEquals(12, entries.size)
+        assertEquals(13, entries.size)
         assertEquals(com.sid_imp.leaf.ui.RomWizardStep.BOOT_SELECTION, com.sid_imp.leaf.ui.RomWizardStep.entries.first())
         entries.forEach { key ->
             val spec = com.sid_imp.leaf.ui.FeatureGuideCatalog.getFeatureInfo(key)

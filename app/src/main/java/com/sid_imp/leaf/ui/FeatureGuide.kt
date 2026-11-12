@@ -13,6 +13,7 @@ enum class FeatureInfoKey {
     ADVANCED_REBOOT_AFTER_FLASH,
     ADVANCED_TARGET_SLOT,
     SINGLE_PARTITION,
+    EXTRACT_IMG_FROM_ZIP,
     DISABLE_AVB,
     ADB_SIDELOAD,
     COMMAND_RUNNER,
@@ -109,6 +110,15 @@ object FeatureGuideCatalog {
             tip = "The app reads the filename to guess the right place. Tap Change to pick another."
         )
 
+        FeatureInfoKey.EXTRACT_IMG_FROM_ZIP -> FeatureInfoSpec(
+            key = FeatureInfoKey.EXTRACT_IMG_FROM_ZIP,
+            title = "Extract 1 or More .img from ZIP",
+            icon = Icons.Default.FolderZip,
+            whatItDoes = "Reads a ROM .zip (both A/B payload.bin and Fastboot packages) and pulls out only the .img files you check—straight into Downloads/LeafFlasher or any folder you choose.",
+            whenToUse = "Use this to grab stock boot.img, init_boot.img, vendor_boot.img, or dtbo.img so you can patch them with KernelSU, APatch, or Magisk without unpacking the whole ROM.",
+            tip = "Tap the boot / init_boot quick button inside the picker to grab root images in one tap, or tap any saved .img pill afterward to load it for flashing."
+        )
+
         FeatureInfoKey.DISABLE_AVB -> FeatureInfoSpec(
             key = FeatureInfoKey.DISABLE_AVB,
             title = "Turn Off AVB Check",
@@ -182,7 +192,7 @@ object FeatureGuideCatalog {
             badge = "STEP 3 OF 4",
             title = "One File or Sideload",
             tileFocus = "Partition • Sideload",
-            explanation = "Want to flash just one file like rooted boot.img? Use the Partition tab. Want to send GApps or Magisk in Recovery? Use the Sideload tab.",
+            explanation = "Want to flash just one file like rooted boot.img, or pull init_boot.img / boot.img out of a ROM .zip into Downloads for KernelSU/Magisk patching? Use the Partition tab. Want to send GApps or Magisk in Recovery? Use the Sideload tab.",
             proTip = "Tap any small (i) button anywhere in the app to read a simple explanation.",
             icon = Icons.Default.SystemUpdate,
             isBlueAccent = true

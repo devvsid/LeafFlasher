@@ -158,8 +158,9 @@ fun MainAppScreen(viewModel: MainViewModel) {
     val isFlashingActive by viewModel.isFlashingActive.collectAsState()
     val isZipExtracting by viewModel.isZipExtracting.collectAsState()
     val isSingleFlashing by viewModel.isSinglePartitionFlashing.collectAsState()
+    val isSelectiveExtracting by viewModel.isSelectiveExtracting.collectAsState()
     val isSideloading by viewModel.isSideloading.collectAsState()
-    val focusMode = isFlashingActive || isZipExtracting || isSingleFlashing || isSideloading
+    val focusMode = isFlashingActive || isZipExtracting || isSingleFlashing || isSelectiveExtracting || isSideloading
     val helpTutorAnchor = rememberAnchorBounds()
     var tutorOriginBounds by remember { mutableStateOf<Rect?>(null) }
     var refreshSpinStep by remember { mutableIntStateOf(0) }
@@ -305,6 +306,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             OneUiHeaderFocusBadge(
                                 label = when {
                                     isZipExtracting -> "Unpacking"
+                                    isSelectiveExtracting -> "Extracting"
                                     isSideloading -> "Sideloading"
                                     isSingleFlashing -> "Installing"
                                     else -> "Flashing"

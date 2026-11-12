@@ -10,6 +10,7 @@ import org.tukaani.xz.SingleXZInputStream
 import org.tukaani.xz.XZInputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -99,6 +100,13 @@ object PayloadDumper {
         val partitions: List<PartitionInfo>
     )
 
+    data class PartitionSummary(
+        val name: String,
+        val sizeBytes: Long
+    )
+
+    class NonSequentialPayloadException(message: String) : Exception(message)
+
     data class PayloadProgressSnapshot(
         val completedFiles: Int,
         val totalFiles: Int,
@@ -109,18 +117,116 @@ object PayloadDumper {
         val activeWorkers: List<ActiveExtractionWorker>
     )
 
+    private data class PayloadHeader(
+        val fileFormatVersion: Long,
+        val manifestSize: Long,
+        val metadataSignatureSize: Int,
+        val dataOffsetStart: Long
+    )
+
+    private fun readHeaderFromSource(source: PayloadSource): PayloadHeader {
+        val headerBuf = ByteArray(24)
+        source.readFully(0, headerBuf)
+        val bb = ByteBuffer.wrap(headerBuf)
+        val magic = bb.getInt()
+        if (magic != PAYLOAD_MAGIC) {
+            throw IllegalArgumentException("Invalid payload.bin magic: 0x${Integer.toHexString(magic)}")
+        }
+        val fileFormatVersion = bb.getLong()
+        val manifestSize = bb.getLong()
+        val metadataSignatureSize = if (fileFormatVersion >= 2L) bb.getInt() else 0
+        val manifestOffset = if (fileFormatVersion >= 2L) 24L else 20L
+        if (manifestSize <= 0L || manifestSize > 256L * 1024 * 1024) {
+            throw IllegalStateException("Invalid manifest size: $manifestSize")
+        }
+        val dataOffsetStart = manifestOffset + manifestSize + metadataSignatureSize
+        return PayloadHeader(
+            fileFormatVersion = fileFormatVersion,
+            manifestSize = manifestSize,
+            metadataSignatureSize = metadataSignatureSize,
+            dataOffsetStart = dataOffsetStart
+        )
+    }
+
+    private fun readExactFromStream(stream: InputStream, size: Int): ByteArray {
+        val buf = ByteArray(size)
+        var offset = 0
+        while (offset < size) {
+            val read = stream.read(buf, offset, size - offset)
+            if (read <= 0) throw EOFException("Unexpected EOF while reading payload stream ($offset / $size)")
+            offset += read
+        }
+        return buf
+    }
+
+    private fun skipExactFromStream(stream: InputStream, bytesToSkip: Long, isCancelled: () -> Boolean = { false }) {
+        var remaining = bytesToSkip
+        val scratch = ByteArray(minOf(remaining, 128L * 1024L).toInt().coerceAtLeast(1))
+        while (remaining > 0L) {
+            if (isCancelled()) throw CancellationException("Extraction cancelled")
+            val chunk = minOf(remaining, scratch.size.toLong()).toInt()
+            val read = stream.read(scratch, 0, chunk)
+            if (read <= 0) throw EOFException("Unexpected EOF while skipping $remaining payload bytes")
+            remaining -= read
+        }
+    }
+
+    /**
+     * Reads only the CrAU header + manifest bytes to list partition names and sizes in milliseconds.
+     */
+    fun inspectPayload(source: PayloadSource): List<PartitionSummary> {
+        val hdr = readHeaderFromSource(source)
+        val manifestOffset = if (hdr.fileFormatVersion >= 2L) 24L else 20L
+        val manifestBytes = ByteArray(hdr.manifestSize.toInt())
+        source.readFully(manifestOffset, manifestBytes)
+        return parseManifestSummary(manifestBytes)
+    }
+
+    fun inspectPayloadFile(payloadFile: File): List<PartitionSummary> {
+        return FilePayloadSource(payloadFile).use { inspectPayload(it) }
+    }
+
+    fun inspectPayloadFromChannel(
+        channel: FileChannel,
+        baseOffset: Long,
+        totalSize: Long
+    ): List<PartitionSummary> {
+        return ChannelPayloadSource(channel, baseOffset, totalSize).use { inspectPayload(it) }
+    }
+
+    fun inspectPayloadFromStream(stream: InputStream): List<PartitionSummary> {
+        val hdrPrefix = readExactFromStream(stream, 20)
+        val bb = ByteBuffer.wrap(hdrPrefix)
+        val magic = bb.getInt()
+        if (magic != PAYLOAD_MAGIC) {
+            throw IllegalArgumentException("Invalid payload.bin magic: 0x${Integer.toHexString(magic)}")
+        }
+        val fileFormatVersion = bb.getLong()
+        val manifestSize = bb.getLong()
+        if (fileFormatVersion >= 2L) {
+            readExactFromStream(stream, 4) // metadata signature size
+        }
+        if (manifestSize <= 0L || manifestSize > 256L * 1024 * 1024) {
+            throw IllegalStateException("Invalid manifest size: $manifestSize")
+        }
+        val manifestBytes = readExactFromStream(stream, manifestSize.toInt())
+        return parseManifestSummary(manifestBytes)
+    }
+
     /**
      * Extracts partition images from a File payload.bin into outputDir using parallel multi-core processing.
      */
     suspend fun extractPayload(
         payloadFile: File,
         outputDir: File,
+        targetPartitions: Set<String>? = null,
+        isCancelled: () -> Boolean = { false },
         onPartitionLog: (partitionName: String) -> Unit = {},
         onProgress: (partitionName: String, partitionIndex: Int, totalPartitions: Int, percent: Int) -> Unit = { _, _, _, _ -> },
         onSnapshot: ((PayloadProgressSnapshot) -> Unit)? = null
     ): List<File> = withContext(Dispatchers.IO) {
         FilePayloadSource(payloadFile).use { source ->
-            extractFromSource(source, outputDir, onPartitionLog, onProgress, onSnapshot)
+            extractFromSource(source, outputDir, targetPartitions, isCancelled, onPartitionLog, onProgress, onSnapshot)
         }
     }
 
@@ -132,59 +238,261 @@ object PayloadDumper {
         baseOffset: Long,
         totalSize: Long,
         outputDir: File,
+        targetPartitions: Set<String>? = null,
+        isCancelled: () -> Boolean = { false },
         onPartitionLog: (partitionName: String) -> Unit = {},
         onProgress: (partitionName: String, partitionIndex: Int, totalPartitions: Int, percent: Int) -> Unit = { _, _, _, _ -> },
         onSnapshot: ((PayloadProgressSnapshot) -> Unit)? = null
     ): List<File> = withContext(Dispatchers.IO) {
         ChannelPayloadSource(channel, baseOffset, totalSize).use { source ->
-            extractFromSource(source, outputDir, onPartitionLog, onProgress, onSnapshot)
+            extractFromSource(source, outputDir, targetPartitions, isCancelled, onPartitionLog, onProgress, onSnapshot)
+        }
+    }
+
+    /**
+     * Extracts selected partition images sequentially straight from a compressed/non-seekable payload.bin stream
+     * without writing multi-gigabyte intermediate payload.bin data to disk.
+     */
+    suspend fun extractPayloadFromStream(
+        stream: InputStream,
+        outputDir: File,
+        targetPartitions: Set<String>,
+        isCancelled: () -> Boolean = { false },
+        onPartitionLog: (partitionName: String) -> Unit = {},
+        onProgress: (partitionName: String, partitionIndex: Int, totalPartitions: Int, percent: Int) -> Unit = { _, _, _, _ -> },
+        onSnapshot: ((PayloadProgressSnapshot) -> Unit)? = null
+    ): List<File> = withContext(Dispatchers.IO) {
+        outputDir.mkdirs()
+        if (isCancelled()) throw CancellationException("Extraction cancelled")
+
+        val hdrPrefix = readExactFromStream(stream, 20)
+        val bb = ByteBuffer.wrap(hdrPrefix)
+        val magic = bb.getInt()
+        if (magic != PAYLOAD_MAGIC) {
+            throw IllegalArgumentException("Invalid payload.bin magic: 0x${Integer.toHexString(magic)}")
+        }
+        val fileFormatVersion = bb.getLong()
+        val manifestSize = bb.getLong()
+        val metadataSignatureSize = if (fileFormatVersion >= 2L) {
+            ByteBuffer.wrap(readExactFromStream(stream, 4)).getInt()
+        } else 0
+        if (manifestSize <= 0L || manifestSize > 256L * 1024 * 1024) {
+            throw IllegalStateException("Invalid manifest size: $manifestSize")
+        }
+        val manifestBytes = readExactFromStream(stream, manifestSize.toInt())
+        if (metadataSignatureSize > 0) {
+            skipExactFromStream(stream, metadataSignatureSize.toLong(), isCancelled)
+        }
+
+        val manifest = parseManifest(manifestBytes)
+        val blockSize = if (manifest.blockSize > 0L) manifest.blockSize else 4096L
+        val targetLower = targetPartitions.map { it.lowercase(Locale.US) }.toSet()
+        val selectedPartitions = manifest.partitions.filter { it.name.lowercase(Locale.US) in targetLower }
+        if (selectedPartitions.isEmpty()) {
+            return@withContext emptyList()
+        }
+
+        data class StreamOpTask(
+            val part: PartitionInfo,
+            val op: InstallOperation
+        )
+
+        val streamOps = mutableListOf<StreamOpTask>()
+        for (part in selectedPartitions) {
+            for (op in part.operations) {
+                if (op.type != 6 && op.type != 7 && op.dataLength > 0L) {
+                    streamOps.add(StreamOpTask(part, op))
+                }
+            }
+        }
+        streamOps.sortWith(compareBy<StreamOpTask>({ it.op.dataOffset }, { it.op.dataLength }))
+
+        // Verify strictly non-backtracking offset progression before mutating files
+        var checkPos = 0L
+        var lastOff = -1L
+        var lastLen = -1L
+        for (task in streamOps) {
+            val isSamePrev = task.op.dataOffset == lastOff && task.op.dataLength == lastLen
+            if (!isSamePrev && task.op.dataOffset < checkPos) {
+                throw NonSequentialPayloadException("Overlapping or out-of-order payload offsets")
+            }
+            if (!isSamePrev) {
+                checkPos = task.op.dataOffset + task.op.dataLength
+                lastOff = task.op.dataOffset
+                lastLen = task.op.dataLength
+            }
+        }
+
+        val totalPartitions = selectedPartitions.size
+        val totalPayloadBytes = selectedPartitions.sumOf { maxOf(0L, it.size) }.coerceAtLeast(1L)
+        val startTime = System.currentTimeMillis()
+        var lastEmitMs = 0L
+        var highestPct = 0
+        val partReportedBytes = linkedMapOf<String, Long>()
+        val partCompletedOps = linkedMapOf<String, Int>()
+        val partTotalDataOps = selectedPartitions.associate { p ->
+            p.name to p.operations.count { it.type != 6 && it.type != 7 && it.dataLength > 0L }
+        }
+        val outFiles = selectedPartitions.associateWith { File(outputDir, "${it.name}.img") }
+        val channels = linkedMapOf<String, FileChannel>()
+        val finishedPartitions = mutableSetOf<String>()
+        var succeeded = false
+
+        try {
+            selectedPartitions.forEach { part ->
+                val file = outFiles.getValue(part)
+                val ch = FileChannel.open(
+                    file.toPath(),
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.READ,
+                    StandardOpenOption.TRUNCATE_EXISTING
+                )
+                if (part.size > 0L) ch.truncate(part.size)
+                channels[part.name] = ch
+                partReportedBytes[part.name] = 0L
+                partCompletedOps[part.name] = 0
+                onPartitionLog(part.name)
+            }
+
+            fun emitStreamSnapshot(triggerName: String, force: Boolean) {
+                val now = System.currentTimeMillis()
+                if (!force && now - lastEmitMs < 75L) return
+                lastEmitMs = now
+                val doneCount = finishedPartitions.size
+                val writtenNow = partReportedBytes.values.sum()
+                val elapsedSec = maxOf(0.1, (now - startTime) / 1000.0)
+                val speedMb = (writtenNow / (1024.0 * 1024.0)) / elapsedSec
+                val rawPct = if (doneCount >= totalPartitions) 100 else ((writtenNow * 100L) / totalPayloadBytes).toInt().coerceIn(0, 99)
+                highestPct = maxOf(highestPct, rawPct)
+                val speedStr = String.format(Locale.US, "%.1f MB/s", speedMb)
+                onProgress("$triggerName.img • $speedStr", doneCount, totalPartitions, highestPct)
+                if (onSnapshot != null) {
+                    val active = selectedPartitions
+                        .filter { it.name !in finishedPartitions }
+                        .map { p ->
+                            val written = partReportedBytes[p.name] ?: 0L
+                            val pct = if (p.size > 0L) ((written * 100L) / p.size).toInt().coerceIn(0, 99) else 0
+                            ActiveExtractionWorker(
+                                partitionName = p.name,
+                                fileSizeBytes = maxOf(0L, p.size),
+                                bytesWritten = written,
+                                percent = pct
+                            )
+                        }
+                    onSnapshot(
+                        PayloadProgressSnapshot(
+                            completedFiles = doneCount,
+                            totalFiles = totalPartitions,
+                            bytesExtracted = writtenNow,
+                            totalBytes = totalPayloadBytes,
+                            speedMbPerSec = speedMb,
+                            overallPercent = highestPct,
+                            activeWorkers = active
+                        )
+                    )
+                }
+            }
+
+            // Mark any partitions that have zero data operations (all ZERO/DISCARD) as immediately finished
+            selectedPartitions.forEach { p ->
+                if ((partTotalDataOps[p.name] ?: 0) == 0) {
+                    partReportedBytes[p.name] = maxOf(0L, p.size)
+                    finishedPartitions.add(p.name)
+                }
+            }
+            emitStreamSnapshot(selectedPartitions.first().name, force = true)
+
+            val threadBuffer = ByteArray(512 * 1024)
+            var currentBlobPos = 0L
+            var prevOffset = -1L
+            var prevLen = -1L
+            var prevCompData: ByteArray? = null
+
+            for (task in streamOps) {
+                if (isCancelled()) throw CancellationException("Extraction cancelled")
+                val op = task.op
+                val compData = if (op.dataOffset == prevOffset && op.dataLength == prevLen && prevCompData != null) {
+                    prevCompData
+                } else {
+                    if (op.dataOffset > currentBlobPos) {
+                        skipExactFromStream(stream, op.dataOffset - currentBlobPos, isCancelled)
+                        currentBlobPos = op.dataOffset
+                    }
+                    val bytes = readExactFromStream(stream, op.dataLength.toInt())
+                    currentBlobPos += op.dataLength
+                    prevOffset = op.dataOffset
+                    prevLen = op.dataLength
+                    prevCompData = bytes
+                    bytes
+                }
+
+                val ch = channels.getValue(task.part.name)
+                writeOperationToChannel(compData, op, ch, blockSize, threadBuffer)
+
+                val covered = (partReportedBytes[task.part.name] ?: 0L) + op.dstExtents.sumOf { it.numBlocks * blockSize }
+                val clamped = if (task.part.size > 0L) minOf(task.part.size, covered) else covered
+                partReportedBytes[task.part.name] = clamped
+
+                val opsDone = (partCompletedOps[task.part.name] ?: 0) + 1
+                partCompletedOps[task.part.name] = opsDone
+                val totalOpsForPart = partTotalDataOps[task.part.name] ?: 0
+                val isPartDone = opsDone >= totalOpsForPart
+                if (isPartDone) {
+                    partReportedBytes[task.part.name] = maxOf(0L, task.part.size)
+                    finishedPartitions.add(task.part.name)
+                }
+                emitStreamSnapshot(task.part.name, force = isPartDone)
+            }
+
+            succeeded = true
+            selectedPartitions.map { outFiles.getValue(it) }
+        } finally {
+            channels.values.forEach { ch ->
+                try { ch.close() } catch (_: Exception) {}
+            }
+            if (!succeeded) {
+                outFiles.values.forEach { f ->
+                    try { f.delete() } catch (_: Exception) {}
+                }
+            }
         }
     }
 
     private suspend fun extractFromSource(
         source: PayloadSource,
         outputDir: File,
+        targetPartitions: Set<String>?,
+        isCancelled: () -> Boolean,
         onPartitionLog: (partitionName: String) -> Unit,
         onProgress: (partitionName: String, partitionIndex: Int, totalPartitions: Int, percent: Int) -> Unit,
         onSnapshot: ((PayloadProgressSnapshot) -> Unit)?
     ): List<File> = coroutineScope {
         outputDir.mkdirs()
+        if (isCancelled()) throw CancellationException("Extraction cancelled")
 
-        // 1. Verify Magic: "CrAU" (4 bytes)
-        val headerBuf = ByteArray(24)
-        source.readFully(0, headerBuf)
-        val bb = ByteBuffer.wrap(headerBuf)
-        val magic = bb.getInt()
-        if (magic != PAYLOAD_MAGIC) {
-            throw IllegalArgumentException("Invalid payload.bin magic: 0x${Integer.toHexString(magic)}")
-        }
-
-        // 2. Read file format version & manifest size
-        val fileFormatVersion = bb.getLong()
-        val manifestSize = bb.getLong()
-
-        // 3. Read signature size (if version >= 2)
-        val metadataSignatureSize = if (fileFormatVersion >= 2) {
-            val sigBuf = ByteArray(4)
-            source.readFully(20, sigBuf)
-            ByteBuffer.wrap(sigBuf).getInt()
-        } else 0
-
-        val manifestOffset = if (fileFormatVersion >= 2) 24L else 20L
-        if (manifestSize <= 0 || manifestSize > 256 * 1024 * 1024) {
-            throw IllegalStateException("Invalid manifest size: $manifestSize")
-        }
-
-        val manifestBytes = ByteArray(manifestSize.toInt())
+        val hdr = readHeaderFromSource(source)
+        val manifestOffset = if (hdr.fileFormatVersion >= 2L) 24L else 20L
+        val manifestBytes = ByteArray(hdr.manifestSize.toInt())
         source.readFully(manifestOffset, manifestBytes)
 
-        val dataOffsetStart = manifestOffset + manifestSize + metadataSignatureSize
+        val dataOffsetStart = hdr.dataOffsetStart
 
-        // 4. Parse DeltaArchiveManifest
+        // 4. Parse DeltaArchiveManifest & optionally filter to user-selected partitions
         val manifest = parseManifest(manifestBytes)
         val blockSize = if (manifest.blockSize > 0) manifest.blockSize else 4096L
-        val totalPartitions = manifest.partitions.size
-        val totalPayloadBytes = manifest.partitions.sumOf { maxOf(0L, it.size) }.coerceAtLeast(1L)
+        val targetLower = targetPartitions?.map { it.lowercase(Locale.US) }?.toSet()
+        val partitionsToExtract = if (targetLower != null) {
+            manifest.partitions.filter { it.name.lowercase(Locale.US) in targetLower }
+        } else {
+            manifest.partitions
+        }
+        val totalPartitions = partitionsToExtract.size
+        val totalPayloadBytes = partitionsToExtract.sumOf { maxOf(0L, it.size) }.coerceAtLeast(1L)
+
+        if (totalPartitions == 0) {
+            return@coroutineScope emptyList()
+        }
 
         val completedCount = AtomicInteger(0)
         val totalBytesWritten = AtomicLong(0L)
@@ -250,11 +558,12 @@ object PayloadDumper {
             "boot", "init_boot", "dtbo", "vendor_boot", "lk", "vbmeta", "vbmeta_system",
             "vbmeta_vendor", "preloader_raw", "logo", "tee", "modem", "apusys", "dpm"
         )
-        val sortedPartitions = manifest.partitions.sortedByDescending { it.name.lowercase() in criticalFirmware }
+        val sortedPartitions = partitionsToExtract.sortedByDescending { it.name.lowercase() in criticalFirmware }
 
         val jobs = sortedPartitions.map { part ->
             async(Dispatchers.IO) {
                 semaphore.withPermit {
+                    if (isCancelled()) throw CancellationException("Extraction cancelled")
                     onPartitionLog(part.name)
                     activeWorkersMap[part.name] = ActiveExtractionWorker(
                         partitionName = part.name,
@@ -266,21 +575,35 @@ object PayloadDumper {
 
                     val outFile = File(outputDir, "${part.name}.img")
                     var reportedPartBytes = 0L
-
-                    extractSinglePartition(source, dataOffsetStart, part, blockSize, outFile) { coveredBytes, partPct ->
-                        val clampedBytes = if (part.size > 0L) minOf(part.size, coveredBytes) else coveredBytes
-                        val delta = (clampedBytes - reportedPartBytes).coerceAtLeast(0L)
-                        if (delta > 0L) {
-                            reportedPartBytes += delta
-                            totalBytesWritten.addAndGet(delta)
+                    var completedOk = false
+                    try {
+                        extractSinglePartition(
+                            source = source,
+                            dataOffsetStart = dataOffsetStart,
+                            part = part,
+                            blockSize = blockSize,
+                            outFile = outFile,
+                            isCancelled = isCancelled
+                        ) { coveredBytes, partPct ->
+                            val clampedBytes = if (part.size > 0L) minOf(part.size, coveredBytes) else coveredBytes
+                            val delta = (clampedBytes - reportedPartBytes).coerceAtLeast(0L)
+                            if (delta > 0L) {
+                                reportedPartBytes += delta
+                                totalBytesWritten.addAndGet(delta)
+                            }
+                            activeWorkersMap[part.name] = ActiveExtractionWorker(
+                                partitionName = part.name,
+                                fileSizeBytes = maxOf(0L, part.size),
+                                bytesWritten = reportedPartBytes,
+                                percent = partPct.coerceIn(0, 99)
+                            )
+                            emitSnapshot(part.name, force = false)
                         }
-                        activeWorkersMap[part.name] = ActiveExtractionWorker(
-                            partitionName = part.name,
-                            fileSizeBytes = maxOf(0L, part.size),
-                            bytesWritten = reportedPartBytes,
-                            percent = partPct.coerceIn(0, 99)
-                        )
-                        emitSnapshot(part.name, force = false)
+                        completedOk = true
+                    } finally {
+                        if (!completedOk) {
+                            try { outFile.delete() } catch (_: Exception) {}
+                        }
                     }
 
                     val remainingDelta = (maxOf(0L, part.size) - reportedPartBytes).coerceAtLeast(0L)
@@ -296,19 +619,78 @@ object PayloadDumper {
         jobs.awaitAll()
     }
 
+    private fun writeBufferFully(ch: FileChannel, bb: ByteBuffer, writePos: Long) {
+        var pos = writePos
+        while (bb.hasRemaining()) {
+            val w = ch.write(bb, pos)
+            if (w <= 0) break
+            pos += w
+        }
+    }
+
+    private fun writeOperationToChannel(
+        compData: ByteArray,
+        op: InstallOperation,
+        ch: FileChannel,
+        blockSize: Long,
+        threadBuffer: ByteArray
+    ) {
+        // FAST PATH: Single-extent operations stream directly into the FileChannel
+        if (op.dstExtents.size == 1) {
+            val ext = op.dstExtents[0]
+            val writePos = ext.startBlock * blockSize
+            val maxBytes = ext.numBlocks * blockSize
+
+            if (op.type == 0) { // Raw uncompressed REPLACE
+                val toWrite = minOf(compData.size.toLong(), maxBytes).toInt()
+                writeBufferFully(ch, ByteBuffer.wrap(compData, 0, toWrite), writePos)
+            } else {
+                val stream = createDecompressorStream(compData, op.type)
+                if (stream != null) {
+                    stream.use { s ->
+                        decompressStreamToChannel(s, ch, writePos, maxBytes, threadBuffer)
+                    }
+                } else {
+                    val toWrite = minOf(compData.size.toLong(), maxBytes).toInt()
+                    writeBufferFully(ch, ByteBuffer.wrap(compData, 0, toWrite), writePos)
+                }
+            }
+        } else {
+            // MULTI-EXTENT PATH: decompress into sized buffer and distribute across extents
+            val expectedBytes = op.dstExtents.sumOf { it.numBlocks * blockSize }
+            val decompressed = decompressBlock(compData, op.type, expectedBytes)
+            var dataOffset = 0
+            for (ext in op.dstExtents) {
+                val writePos = ext.startBlock * blockSize
+                val bytesToWrite = minOf(
+                    ext.numBlocks * blockSize,
+                    (decompressed.size - dataOffset).toLong()
+                ).toInt()
+
+                if (bytesToWrite > 0) {
+                    val buf = ByteBuffer.wrap(decompressed, dataOffset, bytesToWrite)
+                    writeBufferFully(ch, buf, writePos)
+                    dataOffset += bytesToWrite
+                }
+            }
+        }
+    }
+
     private fun extractSinglePartition(
         source: PayloadSource,
         dataOffsetStart: Long,
         part: PartitionInfo,
         blockSize: Long,
         outFile: File,
+        isCancelled: () -> Boolean = { false },
         onOpProgress: ((coveredBytes: Long, partPercent: Int) -> Unit)? = null
     ) {
         val outChannel = FileChannel.open(
             outFile.toPath(),
             StandardOpenOption.CREATE,
             StandardOpenOption.WRITE,
-            StandardOpenOption.READ
+            StandardOpenOption.READ,
+            StandardOpenOption.TRUNCATE_EXISTING
         )
 
         outChannel.use { ch ->
@@ -325,52 +707,14 @@ object PayloadDumper {
             var lastOpReportMs = 0L
 
             for ((opIdx, op) in part.operations.withIndex()) {
+                if (isCancelled()) throw CancellationException("Extraction cancelled")
                 val opBlocksBytes = op.dstExtents.sumOf { it.numBlocks * blockSize }
 
                 // OTARIPPER OPTIMIZATION: ZERO and DISCARD require NO disk writes.
                 if (op.type != 6 && op.type != 7 && op.dataLength > 0) {
                     val compData = ByteArray(op.dataLength.toInt())
                     source.readFully(dataOffsetStart + op.dataOffset, compData)
-
-                    // FAST PATH: Single-extent operations stream directly into the FileChannel
-                    if (op.dstExtents.size == 1) {
-                        val ext = op.dstExtents[0]
-                        val writePos = ext.startBlock * blockSize
-                        val maxBytes = ext.numBlocks * blockSize
-
-                        if (op.type == 0) { // Raw uncompressed REPLACE
-                            val toWrite = minOf(compData.size.toLong(), maxBytes).toInt()
-                            ch.write(ByteBuffer.wrap(compData, 0, toWrite), writePos)
-                        } else {
-                            val stream = createDecompressorStream(compData, op.type)
-                            if (stream != null) {
-                                stream.use { s ->
-                                    decompressStreamToChannel(s, ch, writePos, maxBytes, threadBuffer)
-                                }
-                            } else {
-                                val toWrite = minOf(compData.size.toLong(), maxBytes).toInt()
-                                ch.write(ByteBuffer.wrap(compData, 0, toWrite), writePos)
-                            }
-                        }
-                    } else {
-                        // MULTI-EXTENT PATH: decompress into sized buffer and distribute across extents
-                        val expectedBytes = op.dstExtents.sumOf { it.numBlocks * blockSize }
-                        val decompressed = decompressBlock(compData, op.type, expectedBytes)
-                        var dataOffset = 0
-                        for (ext in op.dstExtents) {
-                            val writePos = ext.startBlock * blockSize
-                            val bytesToWrite = minOf(
-                                ext.numBlocks * blockSize,
-                                (decompressed.size - dataOffset).toLong()
-                            ).toInt()
-
-                            if (bytesToWrite > 0) {
-                                val buf = ByteBuffer.wrap(decompressed, dataOffset, bytesToWrite)
-                                ch.write(buf, writePos)
-                                dataOffset += bytesToWrite
-                            }
-                        }
-                    }
+                    writeOperationToChannel(compData, op, ch, blockSize, threadBuffer)
                 }
 
                 bytesCovered += opBlocksBytes
@@ -552,6 +896,37 @@ object PayloadDumper {
         }
 
         return if (name.isNotEmpty()) PartitionInfo(name, size, operations) else null
+    }
+
+    private fun parseManifestSummary(data: ByteArray): List<PartitionSummary> {
+        val partitions = mutableListOf<PartitionSummary>()
+        val reader = ProtoStreamReader(data)
+        while (reader.hasMore()) {
+            val (fieldNum, wireType) = reader.readTag()
+            when (fieldNum) {
+                13 -> { // repeated PartitionUpdate partitions
+                    val partBytes = reader.readBytes()
+                    parsePartitionSummary(partBytes)?.let { partitions.add(it) }
+                }
+                else -> reader.skip(wireType)
+            }
+        }
+        return partitions
+    }
+
+    private fun parsePartitionSummary(data: ByteArray): PartitionSummary? {
+        var name = ""
+        var size = 0L
+        val reader = ProtoStreamReader(data)
+        while (reader.hasMore()) {
+            val (fieldNum, wireType) = reader.readTag()
+            when (fieldNum) {
+                1 -> name = reader.readString()
+                7 -> size = parseNewPartitionInfo(reader.readBytes())
+                else -> reader.skip(wireType)
+            }
+        }
+        return if (name.isNotEmpty()) PartitionSummary(name, size) else null
     }
 
     private fun parseNewPartitionInfo(data: ByteArray): Long {

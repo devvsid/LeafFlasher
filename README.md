@@ -56,7 +56,7 @@ Every release APK is built transparently from source by [GitHub Actions](.github
 To verify your downloaded APK matches the published checksum:
 
 ```bash
-sha256sum -c LeafFlasher-by-sid-v2.0.0.apk.sha256
+sha256sum -c LeafFlasher-by-sid-v2.1.0.apk.sha256
 ```
 
 ---
@@ -128,7 +128,7 @@ sha256sum -c LeafFlasher-by-sid-v2.0.0.apk.sha256
 | Tab / Area | What It Does |
 | --- | --- |
 | **Flasher** | Opens ROM `.zip` / `payload.bin` packages or extracted folders, inspects partitions, walks through 4 simple setup choices, and flashes cleanly with Bootloader ↔ FastbootD auto-handoff. |
-| **Partition** | Flashes a single `.img` (`boot.img`, `init_boot.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`, etc.) with automatic filename target matching and sparse splitting. |
+| **Partition** | Flashes a single `.img` (`boot.img`, `init_boot.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`, etc.) with automatic filename target matching and sparse splitting, plus **Extract 1 or more img from zip** to save selected `.img` files directly into `Downloads/LeafFlasher/` or a custom folder for KernelSU / Magisk patching. |
 | **Sideload** | Native USB ADB + `sideload-host` implementation for flashing GApps, Magisk, KernelSU, and recovery OTA `.zip` files over OTG without external binaries. |
 | **Tools** | Run manual `fastboot` or `adb` commands, jump between System / Bootloader / Fastbootd / Recovery, switch A/B slots manually, or format `userdata`. |
 | **Privacy & Trust** | Built purely in **Kotlin**. Declares **no `INTERNET` permission** in [`AndroidManifest.xml`](app/src/main/AndroidManifest.xml) and contains zero analytics, ads, or remote calls. |
@@ -188,8 +188,12 @@ After your ROM finishes loading, Leaf Flasher walks you through four plain-Engli
 - **Live Controls:** Supports **Pause**, **Resume**, and **Cancel** during script flashing with per-partition status feedback.
 - **Clearable Scrollable Terminal:** Expandable mono-spaced console displaying Fastboot responses, ADB status messages, and exact step timings.
 
-### 6. Partition Tab (Flash One `.img` File)
+### 6. Partition Tab (Flash One `.img` & Extract Images from ZIP)
 - **Single-Image Flashing:** Flash individual `.img` files such as `boot.img` (root/kernel), `init_boot.img`, `recovery.img`, `vendor_boot.img`, `dtbo.img`, `vbmeta.img`, or `super_empty.img` to the current active slot without wiping or touching other partitions.
+- **Extract 1 or more img from zip:** Pull out one or multiple specific partition images directly from any ROM `.zip` (`payload.bin` A/B OTA archives or Fastboot `.zip` packages) without unpacking the entire multi-gigabyte ROM:
+  - **Smart Inspection & Multi-Select:** Lists all images inside the archive in milliseconds with search, category filter pills (`Core`, `VBMeta`, `Firmware`, `Logical`), and a one-tap **`boot / init_boot`** quick selector for root patching.
+  - **Saves Directly to User-Accessible Storage:** Writes the extracted `.img` files into **`Downloads/LeafFlasher/<rom-name>/`** by default (visible in your phone's file manager, KernelSU, APatch, and Magisk) or into any custom folder picked via Android's folder chooser.
+  - **Direct Flash Handoff:** Tap any saved `.img` pill in the completion summary to load it straight into **Flash One Image** above.
 - **Smart Target Guessing + Picker:** Automatically detects the destination partition from the filename and provides a **Change** grid picker if your file has a custom name.
 - **Disable AVB Toggle:** Appears automatically whenever `vbmeta` is selected so you can disable AVB verification in one switch.
 - **Large Image Sparse Handling:** Automatically splits oversized raw images into Fastboot sparse chunks matching the device's `max-download-size`.
@@ -222,7 +226,7 @@ After your ROM finishes loading, Leaf Flasher walks you through four plain-Engli
 3. **Check the top status card:** Wait until it turns **green** (Fastboot / FastbootD) or **blue** (ADB / Recovery Sideload). Tap the refresh button if Android asks for USB permission.
 4. **Follow the on-screen tab:**
    - **Flasher tab:** Tap **Choose ROM File or Folder** → pick your `.zip` or folder → choose **Continue** through the 4 options → tap **Start Flashing**.
-   - **Partition tab:** Pick one `.img` file → verify Target Partition → tap **Flash Partition**.
+   - **Partition tab:** Pick one `.img` file → verify Target Partition → tap **Flash Partition**; or use **Extract 1 or more img from zip** to pick a ROM `.zip`, check `boot.img` / `init_boot.img` (or any partitions), and save them straight to `Downloads/LeafFlasher/` for KernelSU or Magisk patching.
    - **Sideload tab:** Pick your `.zip` add-on → confirm phone is waiting in ADB Sideload → tap **Start ADB Sideload**.
 
 > [!CAUTION]

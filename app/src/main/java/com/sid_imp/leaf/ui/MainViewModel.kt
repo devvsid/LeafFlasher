@@ -3,6 +3,7 @@ package com.sid_imp.leaf.ui
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
@@ -155,6 +156,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isFormattingData = MutableStateFlow(false)
     val isFormattingData: StateFlow<Boolean> = _isFormattingData.asStateFlow()
+
+    // Selective image extraction from ROM ZIP (Partition tab -> Extract 1 or more img from zip)
+    private val _showZipPartitionExtractDialog = MutableStateFlow(false)
+    val showZipPartitionExtractDialog: StateFlow<Boolean> = _showZipPartitionExtractDialog.asStateFlow()
+
+    private val _isInspectingZipPartitions = MutableStateFlow(false)
+    val isInspectingZipPartitions: StateFlow<Boolean> = _isInspectingZipPartitions.asStateFlow()
+
+    private val _inspectedZipName = MutableStateFlow("")
+    val inspectedZipName: StateFlow<String> = _inspectedZipName.asStateFlow()
+
+    private val _inspectedZipPartitions = MutableStateFlow<List<ZipPartitionEntry>>(emptyList())
+    val inspectedZipPartitions: StateFlow<List<ZipPartitionEntry>> = _inspectedZipPartitions.asStateFlow()
+
+    private val _zipInspectionError = MutableStateFlow<String?>(null)
+    val zipInspectionError: StateFlow<String?> = _zipInspectionError.asStateFlow()
+
+    private val _selectiveOutputTreeUri = MutableStateFlow<Uri?>(null)
+    val selectiveOutputTreeUri: StateFlow<Uri?> = _selectiveOutputTreeUri.asStateFlow()
+
+    private val _selectiveOutputFolderLabel = MutableStateFlow("Downloads/LeafFlasher")
+    val selectiveOutputFolderLabel: StateFlow<String> = _selectiveOutputFolderLabel.asStateFlow()
+
+    private val _selectiveExtractProgress = MutableStateFlow(ZipExtractionProgress())
+    val selectiveExtractProgress: StateFlow<ZipExtractionProgress> = _selectiveExtractProgress.asStateFlow()
+
+    val isSelectiveExtracting: StateFlow<Boolean> = _selectiveExtractProgress
+        .map { it.isExtracting }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _lastSelectiveExtractResult = MutableStateFlow<SelectiveExtractionResult?>(null)
+    val lastSelectiveExtractResult: StateFlow<SelectiveExtractionResult?> = _lastSelectiveExtractResult.asStateFlow()
+
+    private var inspectedZipUri: Uri? = null
+    private var inspectZipJob: Job? = null
+    private var selectiveExtractJob: Job? = null
+    @Volatile private var isSelectiveCancelled = false
 
     // ADB Sideload states (GApps, Magisk, OTA ROMs, ZIP mods)
     private val _sideloadZipUri = MutableStateFlow<Uri?>(null)
@@ -1193,6 +1232,162 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSingleDisableVerity(enabled: Boolean) {
         _singleDisableVerity.value = enabled
+    }
+
+    fun inspectZipFileForSingleExtract(file: File) {
+        if (!file.exists() || !file.isFile) {
+            flashExecutor.addLog("✗ Invalid ZIP file selected")
+            return
+        }
+        inspectZipForSingleExtract(Uri.fromFile(file))
+    }
+
+    fun inspectZipForSingleExtract(zipUri: Uri) {
+        if (isSelectiveExtracting.value) return
+        inspectZipJob?.cancel()
+        inspectedZipUri = zipUri
+        _showZipPartitionExtractDialog.value = true
+        _isInspectingZipPartitions.value = true
+        _zipInspectionError.value = null
+        _inspectedZipPartitions.value = emptyList()
+
+        val initialName = getFileNameFromUri(zipUri).takeIf { it.isNotBlank() && it != "unknown.img" }
+            ?: File(zipUri.path ?: "rom_package.zip").name.ifBlank { "rom_package.zip" }
+        _inspectedZipName.value = initialName
+
+        inspectZipJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val (resolvedName, _) = resolveFileNameAndSize(zipUri)
+                val archiveName = resolvedName.takeIf { it.isNotBlank() && it != "unknown.img" } ?: initialName
+                _inspectedZipName.value = archiveName
+                if (_selectiveOutputTreeUri.value == null) {
+                    val folderSuffix = RomZipExtractor.sanitizeArchiveFolderName(archiveName)
+                    _selectiveOutputFolderLabel.value = "Downloads/LeafFlasher/$folderSuffix"
+                }
+
+                val inspection = RomZipExtractor.inspectRomZipPartitions(
+                    context = context,
+                    zipUri = zipUri,
+                    archiveDisplayName = archiveName
+                )
+                _isInspectingZipPartitions.value = false
+                if (inspection.success && inspection.partitions.isNotEmpty()) {
+                    _inspectedZipPartitions.value = inspection.partitions
+                    _zipInspectionError.value = null
+                    flashExecutor.addLog("✓ Indexed ${inspection.partitions.size} partitions in $archiveName")
+                } else {
+                    _inspectedZipPartitions.value = emptyList()
+                    val err = inspection.errorMessage ?: "No extractable partition images found"
+                    _zipInspectionError.value = err
+                    flashExecutor.addLog("✗ Cannot read $archiveName: $err")
+                }
+            } catch (e: Exception) {
+                _isInspectingZipPartitions.value = false
+                val err = e.message ?: "Failed to inspect ZIP archive"
+                _zipInspectionError.value = err
+                flashExecutor.addLog("✗ Cannot read ZIP: $err")
+            }
+        }
+    }
+
+    fun dismissZipPartitionExtractDialog() {
+        inspectZipJob?.cancel()
+        _isInspectingZipPartitions.value = false
+        _showZipPartitionExtractDialog.value = false
+    }
+
+    fun setSelectiveOutputTreeUri(treeUri: Uri?) {
+        if (treeUri == null) {
+            _selectiveOutputTreeUri.value = null
+            val archiveName = _inspectedZipName.value
+            _selectiveOutputFolderLabel.value = if (archiveName.isNotBlank()) {
+                "Downloads/LeafFlasher/${RomZipExtractor.sanitizeArchiveFolderName(archiveName)}"
+            } else {
+                "Downloads/LeafFlasher"
+            }
+            return
+        }
+        try {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(treeUri, flags)
+        } catch (_: Exception) {}
+        val docName = DocumentFile.fromTreeUri(context, treeUri)?.name?.takeIf { it.isNotBlank() } ?: "Selected Folder"
+        _selectiveOutputTreeUri.value = treeUri
+        _selectiveOutputFolderLabel.value = docName
+    }
+
+    fun startSelectiveZipExtraction(selected: List<ZipPartitionEntry>) {
+        if (selected.isEmpty() || isSelectiveExtracting.value) return
+        val zipUri = inspectedZipUri ?: return
+        val archiveName = _inspectedZipName.value.ifBlank { "rom_package.zip" }
+        val outputTree = _selectiveOutputTreeUri.value
+
+        _showZipPartitionExtractDialog.value = false
+        _lastSelectiveExtractResult.value = null
+        _isLogExpanded.value = true
+        isSelectiveCancelled = false
+        _selectiveExtractProgress.value = ZipExtractionProgress(
+            isExtracting = true,
+            totalFiles = selected.size,
+            statusMessage = "Preparing ${selected.size} partition(s)...",
+            percent = 1
+        )
+
+        selectiveExtractJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                flashExecutor.addLog("Extracting ${selected.size} image(s) from $archiveName...")
+                val result = RomZipExtractor.extractSelectedPartitionsFromZip(
+                    context = context,
+                    zipUri = zipUri,
+                    archiveDisplayName = archiveName,
+                    selectedEntries = selected,
+                    outputTreeUri = outputTree,
+                    isCancelled = { isSelectiveCancelled },
+                    onLog = { line -> flashExecutor.addLog(line) },
+                    onProgress = { progress -> _selectiveExtractProgress.value = progress }
+                )
+                _selectiveExtractProgress.value = ZipExtractionProgress()
+                when {
+                    result.cancelled -> {
+                        flashExecutor.addLog("✗ Extraction cancelled")
+                    }
+                    result.success -> {
+                        _lastSelectiveExtractResult.value = result
+                        flashExecutor.addLog("✓ Saved ${result.savedFiles.size} image(s) to ${result.destinationDisplayPath}")
+                    }
+                    else -> {
+                        flashExecutor.addLog("✗ Extraction failed: ${result.errorMessage}")
+                    }
+                }
+            } catch (e: Exception) {
+                _selectiveExtractProgress.value = ZipExtractionProgress()
+                flashExecutor.addLog("✗ Extraction error: ${e.message}")
+            }
+        }
+    }
+
+    fun cancelSelectiveZipExtraction() {
+        isSelectiveCancelled = true
+        _selectiveExtractProgress.value = _selectiveExtractProgress.value.copy(
+            statusMessage = "Cancelling extraction..."
+        )
+        flashExecutor.addLog("Cancelling image extraction...")
+    }
+
+    fun clearLastSelectiveExtractResult() {
+        _lastSelectiveExtractResult.value = null
+    }
+
+    fun loadExtractedImageForSingleFlash(saved: SavedExtractedFile) {
+        _singleSelectedFileUri.value = saved.uri
+        _singleSelectedFileName.value = saved.fileName
+        _singleSelectedFileSize.value = saved.sizeBytes
+        val detectedStem = FlashScriptParser.normalizePartitionStem(saved.fileName)
+        _singlePartitionName.value = detectedStem
+        if (!detectedStem.startsWith("vbmeta")) {
+            _singleDisableVerity.value = false
+        }
+        flashExecutor.addLog("✓ Loaded ${saved.fileName} -> $detectedStem for flashing")
     }
 
     fun flashSinglePartition() {

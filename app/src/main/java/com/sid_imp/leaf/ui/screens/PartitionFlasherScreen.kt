@@ -1,6 +1,10 @@
 package com.sid_imp.leaf.ui.screens
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -12,6 +16,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,12 +34,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.sid_imp.leaf.fastboot.FastbootMode
+import com.sid_imp.leaf.script.ZipPartitionEntry
 import com.sid_imp.leaf.ui.FeatureInfoKey
 import com.sid_imp.leaf.ui.MainViewModel
 import com.sid_imp.leaf.ui.components.*
@@ -47,6 +55,7 @@ fun PartitionFlasherScreen(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val partitionName by viewModel.singlePartitionName.collectAsState()
     val selectedFileUri by viewModel.singleSelectedFileUri.collectAsState()
     val selectedFileName by viewModel.singleSelectedFileName.collectAsState()
@@ -56,18 +65,71 @@ fun PartitionFlasherScreen(
     val fastbootMode by viewModel.fastbootMode.collectAsState()
     val deviceInfo by viewModel.deviceInfo.collectAsState()
     val isFlashing by viewModel.isSinglePartitionFlashing.collectAsState()
+    val isSelectiveExtracting by viewModel.isSelectiveExtracting.collectAsState()
     val isLogExpanded by viewModel.isLogExpanded.collectAsState()
+
+    val showZipExtractDialog by viewModel.showZipPartitionExtractDialog.collectAsState()
+    val isInspectingZipPartitions by viewModel.isInspectingZipPartitions.collectAsState()
+    val inspectedZipName by viewModel.inspectedZipName.collectAsState()
+    val inspectedZipPartitions by viewModel.inspectedZipPartitions.collectAsState()
+    val zipInspectionError by viewModel.zipInspectionError.collectAsState()
+    val selectiveOutputTreeUri by viewModel.selectiveOutputTreeUri.collectAsState()
+    val selectiveOutputFolderLabel by viewModel.selectiveOutputFolderLabel.collectAsState()
+    val lastSelectiveExtractResult by viewModel.lastSelectiveExtractResult.collectAsState()
 
     var showPartitionPicker by remember { mutableStateOf(false) }
     var partitionPickerOrigin by remember { mutableStateOf<Rect?>(null) }
+    var showZipPickerDialog by remember { mutableStateOf(false) }
+    var zipPickerOrigin by remember { mutableStateOf<Rect?>(null) }
     var activeFeatureInfo by remember { mutableStateOf<Pair<FeatureInfoKey, Rect?>?>(null) }
+    var pendingSelectiveEntries by remember { mutableStateOf<List<ZipPartitionEntry>?>(null) }
 
     val changePartitionAnchor = rememberAnchorBounds()
+    val extractZipCardAnchor = rememberAnchorBounds()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { viewModel.setSingleSelectedFile(it) }
+    }
+
+    val extractZipDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.inspectZipForSingleExtract(it) }
+    }
+
+    val extractOutputTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.setSelectiveOutputTreeUri(it) }
+    }
+
+    val legacyWriteStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val pending = pendingSelectiveEntries
+        pendingSelectiveEntries = null
+        if (granted && pending != null) {
+            viewModel.startSelectiveZipExtraction(pending)
+        } else if (!granted) {
+            viewModel.flashExecutor.addLog("✗ Allow storage write access or tap Change to choose an output folder")
+        }
+    }
+
+    fun launchExtractionWithStorageCheck(selected: List<ZipPartitionEntry>) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && selectiveOutputTreeUri == null) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                pendingSelectiveEntries = selected
+                legacyWriteStorageLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                return
+            }
+        }
+        viewModel.startSelectiveZipExtraction(selected)
     }
 
     val isVbmeta = partitionName.lowercase().startsWith("vbmeta")
@@ -83,11 +145,15 @@ fun PartitionFlasherScreen(
 
     val metrics = LocalLeafUiMetrics.current
 
-    // Auto-dismiss popups when flashing begins for Pure Focus Mode
-    LaunchedEffect(isFlashing) {
-        if (isFlashing) {
+    // Auto-dismiss popups when flashing or extraction begins for Pure Focus Mode
+    LaunchedEffect(isFlashing, isSelectiveExtracting) {
+        if (isFlashing || isSelectiveExtracting) {
             showPartitionPicker = false
+            showZipPickerDialog = false
             activeFeatureInfo = null
+            if (isSelectiveExtracting) {
+                viewModel.dismissZipPartitionExtractDialog()
+            }
         }
     }
 
@@ -96,10 +162,12 @@ fun PartitionFlasherScreen(
         contentAlignment = Alignment.TopCenter
     ) {
         val availableHeight = maxHeight
-        val useFullScreenFocus = isFlashing && availableHeight >= 340.dp
+        val isTaskRunning = isFlashing || isSelectiveExtracting
+        val useFullScreenFocus = isTaskRunning && availableHeight >= 340.dp
         val expandConsoleFull = useFullScreenFocus && isLogExpanded
         val sectionGap = metrics.sectionGapDp.dp
-        val maxColWidth = if (isFlashing) metrics.maxFocusContentWidthDp.dp else metrics.maxContentWidthDp.dp
+        val maxColWidth = if (isTaskRunning) metrics.maxFocusContentWidthDp.dp else metrics.maxContentWidthDp.dp
+        val maxWorkersListHeight = (availableHeight * 0.30f).coerceIn(96.dp, 220.dp)
 
         Column(
             modifier = Modifier
@@ -120,8 +188,8 @@ fun PartitionFlasherScreen(
         ) {
             Spacer(modifier = Modifier.height(if (metrics.isShortHeight) 4.dp else 6.dp))
 
-            // 1. Single Partition Setup + Hero CTA (hidden while flashing for full-screen focus)
-            OneUiAnimatedSection(visible = !isFlashing) {
+            // 1. Single Partition Setup + Hero CTA + Extract from ZIP (hidden while active for full-screen focus)
+            OneUiAnimatedSection(visible = !isTaskRunning) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     OneUiCard(
                         contentPadding = PaddingValues(metrics.cardPaddingDp.dp)
@@ -378,6 +446,237 @@ fun PartitionFlasherScreen(
                     )
 
                     Spacer(modifier = Modifier.height(sectionGap))
+
+                    // 2b. Extract 1 or more img from zip card (for KernelSU / APatch / Magisk / stock backups)
+                    OneUiCard(
+                        contentPadding = PaddingValues(metrics.cardPaddingDp.dp)
+                    ) {
+                        val innerShape = RoundedCornerShape(metrics.innerCornerRadiusDp.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderZip,
+                                    contentDescription = null,
+                                    tint = OneUiEmerald,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Extract 1 or more img from zip",
+                                    fontFamily = IosRoundedFontFamily,
+                                    color = OneUiTextPrimary,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = metrics.cardTitleSp.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OneUiInfoButton(
+                                onClick = { bounds ->
+                                    activeFeatureInfo = FeatureInfoKey.EXTRACT_IMG_FROM_ZIP to bounds
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(if (metrics.isShortHeight) 10.dp else 12.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .trackAnchorBounds(extractZipCardAnchor)
+                                .clip(innerShape)
+                                .background(OneUiInnerTile)
+                                .oneUiBounceClick(enabled = !isTaskRunning, pressedScale = 0.975f) {
+                                    zipPickerOrigin = extractZipCardAnchor.bounds
+                                    showZipPickerDialog = true
+                                }
+                                .padding(horizontal = metrics.innerCardPaddingDp.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(metrics.badgeMediumSizeDp.dp)
+                                        .clip(CircleShape)
+                                        .background(OneUiActiveSurface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = "Pick ROM ZIP",
+                                        tint = OneUiEmerald,
+                                        modifier = Modifier.size((metrics.badgeMediumSizeDp * 0.48f).dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(if (metrics.isCompactWidth) 10.dp else 12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Pick ROM .zip Archive",
+                                        fontFamily = IosRoundedFontFamily,
+                                        fontSize = metrics.bodySp.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = OneUiTextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Save boot, init_boot, dtbo... to Downloads for KSU / Magisk",
+                                        fontFamily = IosRoundedFontFamily,
+                                        fontSize = metrics.captionSp.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = OneUiTextMuted,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = OneUiTextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        val extractRes = lastSelectiveExtractResult
+                        OneUiAnimatedSection(
+                            visible = extractRes != null && extractRes.success && extractRes.savedFiles.isNotEmpty()
+                        ) {
+                            if (extractRes != null && extractRes.savedFiles.isNotEmpty()) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(innerShape)
+                                            .background(OneUiActiveSurface)
+                                            .padding(horizontal = metrics.innerCardPaddingDp.dp, vertical = 10.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = OneUiEmerald,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Saved ${extractRes.savedFiles.size} ${if (extractRes.savedFiles.size == 1) "image" else "images"}",
+                                                    fontFamily = IosRoundedFontFamily,
+                                                    fontSize = metrics.subtitleSp.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = OneUiEmerald,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(CircleShape)
+                                                    .background(OneUiCardSurface)
+                                                    .oneUiBounceClick(pressedScale = 0.92f) {
+                                                        viewModel.clearLastSelectiveExtractResult()
+                                                    }
+                                                    .padding(horizontal = 9.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Clear",
+                                                    fontFamily = IosRoundedFontFamily,
+                                                    fontSize = metrics.microSp.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = OneUiTextSecondary
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = extractRes.destinationDisplayPath,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = metrics.microSp.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = OneUiMint,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Tap an extracted file below to load it above for flashing:",
+                                            fontFamily = IosRoundedFontFamily,
+                                            fontSize = metrics.microSp.sp,
+                                            color = OneUiTextSecondary
+                                        )
+
+                                        Spacer(modifier = Modifier.height(7.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            extractRes.savedFiles.forEach { saved ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(OneUiCardSurface)
+                                                        .oneUiBounceClick(pressedScale = 0.94f) {
+                                                            viewModel.loadExtractedImageForSingleFlash(saved)
+                                                        }
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Bolt,
+                                                        contentDescription = null,
+                                                        tint = OneUiEmerald,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = saved.fileName,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = metrics.microSp.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = OneUiTextPrimary,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(sectionGap))
                 }
             }
 
@@ -390,6 +689,20 @@ fun PartitionFlasherScreen(
                         progressPercentFlow = viewModel.singlePartitionProgressPercent,
                         statusTextFlow = viewModel.singlePartitionStatusText,
                         speedMbFlow = viewModel.singlePartitionSpeedMb
+                    )
+                    Spacer(modifier = Modifier.height(sectionGap))
+                }
+            }
+
+            // 3b. Live Progress Card for Selective Extraction
+            OneUiAnimatedSection(visible = isSelectiveExtracting) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OneUiZipProgressCard(
+                        zipProgressFlow = viewModel.selectiveExtractProgress,
+                        formatBytes = viewModel::formatBytes,
+                        maxWorkersListHeight = maxWorkersListHeight,
+                        title = "Extracting Selected Images",
+                        onCancel = { viewModel.cancelSelectiveZipExtraction() }
                     )
                     Spacer(modifier = Modifier.height(sectionGap))
                 }
@@ -434,6 +747,45 @@ fun PartitionFlasherScreen(
             onSelectPartition = { picked ->
                 viewModel.setSinglePartitionTarget(picked)
             }
+        )
+    }
+
+    if (showZipPickerDialog) {
+        UnifiedRomPickerDialog(
+            originBounds = zipPickerOrigin,
+            zipOnlyMode = true,
+            onDismissRequest = { showZipPickerDialog = false },
+            onZipFileSelected = { zipFile -> viewModel.inspectZipFileForSingleExtract(zipFile) },
+            onLaunchSystemZipPicker = {
+                extractZipDocumentLauncher.launch(
+                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")
+                )
+            }
+        )
+    }
+
+    if (showZipExtractDialog) {
+        ZipPartitionExtractorDialog(
+            archiveName = inspectedZipName,
+            isInspecting = isInspectingZipPartitions,
+            partitions = inspectedZipPartitions,
+            errorMessage = zipInspectionError,
+            outputFolderLabel = selectiveOutputFolderLabel,
+            isCustomOutputFolder = selectiveOutputTreeUri != null,
+            formatBytes = viewModel::formatBytes,
+            originBounds = extractZipCardAnchor.bounds,
+            onDismiss = { viewModel.dismissZipPartitionExtractDialog() },
+            onChooseOutputFolder = {
+                try {
+                    extractOutputTreeLauncher.launch(null)
+                } catch (_: ActivityNotFoundException) {
+                    viewModel.flashExecutor.addLog("✗ System folder picker unavailable on this device")
+                } catch (_: Exception) {
+                    viewModel.flashExecutor.addLog("✗ Unable to open folder picker")
+                }
+            },
+            onResetOutputFolder = { viewModel.setSelectiveOutputTreeUri(null) },
+            onExtractSelected = { selected -> launchExtractionWithStorageCheck(selected) }
         )
     }
 

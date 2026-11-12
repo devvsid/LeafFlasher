@@ -96,12 +96,13 @@ private data class UiDirScanResult(
 @Composable
 fun UnifiedRomPickerDialog(
     originBounds: Rect? = null,
+    zipOnlyMode: Boolean = false,
     onDismissRequest: () -> Unit,
-    onFolderSelected: (File) -> Unit,
+    onFolderSelected: (File) -> Unit = {},
     onZipFileSelected: (File) -> Unit,
     onLaunchSystemZipPicker: () -> Unit,
-    onLaunchSystemFolderPicker: () -> Unit,
-    onPickFilesAlternative: () -> Unit
+    onLaunchSystemFolderPicker: () -> Unit = {},
+    onPickFilesAlternative: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -132,7 +133,7 @@ fun UnifiedRomPickerDialog(
         refreshTrigger++
     }
 
-    LaunchedEffect(currentDir, hasStorageManagerPermission, refreshTrigger) {
+    LaunchedEffect(currentDir, hasStorageManagerPermission, refreshTrigger, zipOnlyMode) {
         val permGranted = withContext(Dispatchers.IO) {
             checkStorageBrowsePermission(context)
         }
@@ -171,11 +172,14 @@ fun UnifiedRomPickerDialog(
                 )
                 var imgs = 0
                 var hasFlashScript = false
-                val items = sorted.map { f ->
+                val items = sorted.mapNotNull { f ->
                     val isDir = f.isDirectory
                     val name = f.name
                     val low = name.lowercase(Locale.US)
                     val isZip = !isDir && low.endsWith(".zip")
+                    if (zipOnlyMode && !isDir && !isZip) {
+                        return@mapNotNull null
+                    }
                     val isImg = !isDir && (low.endsWith(".img") || low.endsWith(".bin") || low.endsWith(".raw"))
                     val isScript = !isDir && (low.endsWith(".sh") || low.endsWith(".bat"))
                     if (isImg) imgs++
@@ -188,7 +192,7 @@ fun UnifiedRomPickerDialog(
                         isZip = isZip,
                         isImg = isImg,
                         isScript = isScript,
-                        sizeLabel = if (isDir || isZip) "" else oneUiFormatSize(f.length())
+                        sizeLabel = if (isDir) "" else oneUiFormatSize(f.length())
                     )
                 }
                 UiDirScanResult(items, imgs, hasFlashScript)
@@ -254,7 +258,7 @@ fun UnifiedRomPickerDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Choose ROM",
+                            text = if (zipOnlyMode) "Choose ROM ZIP" else "Choose ROM",
                             fontFamily = IosRoundedFontFamily,
                             fontWeight = FontWeight.ExtraBold,
                             color = OneUiTextPrimary,
@@ -263,7 +267,11 @@ fun UnifiedRomPickerDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Pick a .zip file or a ROM folder",
+                            text = if (zipOnlyMode) {
+                                "Pick a .zip archive to extract .img files"
+                            } else {
+                                "Pick a .zip file or a ROM folder"
+                            },
                             fontFamily = IosRoundedFontFamily,
                             fontWeight = FontWeight.Medium,
                             color = OneUiTextSecondary,
@@ -334,37 +342,39 @@ fun UnifiedRomPickerDialog(
                     )
                 }
 
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
-                        .clip(CircleShape)
-                        .background(OneUiInnerTile)
-                        .oneUiBounceClick(pressedScale = 0.96f) {
-                            dismiss { onLaunchSystemFolderPicker() }
-                        }
-                        .padding(horizontal = quickBtnHorizPad, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        tint = OneUiMint,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Pick Folder",
-                        fontFamily = IosRoundedFontFamily,
-                        fontSize = metrics.subtitleSp.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = OneUiTextPrimary,
-                        maxLines = 2,
-                        textAlign = TextAlign.Center,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                if (!zipOnlyMode) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
+                            .clip(CircleShape)
+                            .background(OneUiInnerTile)
+                            .oneUiBounceClick(pressedScale = 0.96f) {
+                                dismiss { onLaunchSystemFolderPicker() }
+                            }
+                            .padding(horizontal = quickBtnHorizPad, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            tint = OneUiMint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Pick Folder",
+                            fontFamily = IosRoundedFontFamily,
+                            fontSize = metrics.subtitleSp.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = OneUiTextPrimary,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -410,7 +420,11 @@ fun UnifiedRomPickerDialog(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Allow storage access to open folders directly (including SD Card), or use Pick .zip File / Pick Folder above.",
+                        text = if (zipOnlyMode) {
+                            "Allow storage access to browse Downloads or folders directly, or use Pick .zip File above."
+                        } else {
+                            "Allow storage access to open folders directly (including SD Card), or use Pick .zip File / Pick Folder above."
+                        },
                         fontFamily = IosRoundedFontFamily,
                         color = OneUiTextSecondary,
                         fontSize = metrics.subtitleSp.sp,
@@ -453,26 +467,28 @@ fun UnifiedRomPickerDialog(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    if (!zipOnlyMode) {
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
-                            .clip(CircleShape)
-                            .background(OneUiCardSurface)
-                            .oneUiBounceClick(pressedScale = 0.97f) {
-                                dismiss { onPickFilesAlternative() }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Pick Multiple Files Instead",
-                            fontFamily = IosRoundedFontFamily,
-                            color = OneUiMint,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = metrics.subtitleSp.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
+                                .clip(CircleShape)
+                                .background(OneUiCardSurface)
+                                .oneUiBounceClick(pressedScale = 0.97f) {
+                                    dismiss { onPickFilesAlternative() }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Pick Multiple Files Instead",
+                                fontFamily = IosRoundedFontFamily,
+                                color = OneUiMint,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = metrics.subtitleSp.sp
+                            )
+                        }
                     }
                 }
             } else {
@@ -628,7 +644,11 @@ fun UnifiedRomPickerDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "No direct SD Card found on this device. Use Pick .zip File or Pick Folder above to select from external storage.",
+                                text = if (zipOnlyMode) {
+                                    "No direct SD Card found on this device. Use Pick .zip File above to select from external storage."
+                                } else {
+                                    "No direct SD Card found on this device. Use Pick .zip File or Pick Folder above to select from external storage."
+                                },
                                 fontFamily = IosRoundedFontFamily,
                                 color = OneUiTextPrimary.copy(alpha = 0.92f),
                                 fontWeight = FontWeight.SemiBold,
@@ -638,7 +658,7 @@ fun UnifiedRomPickerDialog(
                         }
                     }
 
-                    if (partitionCount > 0 || hasScript) {
+                    if (!zipOnlyMode && (partitionCount > 0 || hasScript)) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier
@@ -686,7 +706,7 @@ fun UnifiedRomPickerDialog(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "Nothing in this folder",
+                                        text = if (zipOnlyMode) "No folders or .zip files here" else "Nothing in this folder",
                                         fontFamily = IosRoundedFontFamily,
                                         color = OneUiTextSecondary,
                                         fontSize = metrics.bodySp.sp
@@ -775,26 +795,28 @@ fun UnifiedRomPickerDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    if (!zipOnlyMode) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
-                            .clip(CircleShape)
-                            .background(OneUiEmerald)
-                            .oneUiBounceClick(pressedScale = 0.97f) {
-                                dismiss { onFolderSelected(currentDir) }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (partitionCount > 0) "Use This Folder ($partitionCount files)" else "Use This Folder",
-                            fontFamily = IosRoundedFontFamily,
-                            color = OneUiEmeraldDeep,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = metrics.bodySp.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
+                                .clip(CircleShape)
+                                .background(OneUiEmerald)
+                                .oneUiBounceClick(pressedScale = 0.97f) {
+                                    dismiss { onFolderSelected(currentDir) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (partitionCount > 0) "Use This Folder ($partitionCount files)" else "Use This Folder",
+                                fontFamily = IosRoundedFontFamily,
+                                color = OneUiEmeraldDeep,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = metrics.bodySp.sp
+                            )
+                        }
                     }
                 }
             }
