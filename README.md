@@ -1,45 +1,137 @@
-# 🌿 Leaf Flasher
+<div align="center">
 
-**A fast, clean Android-to-Android flashing tool by `sid_imp` ([GitHub `@devvsid`](https://github.com/devvsid) · [Telegram `@sid_imp`](https://t.me/sid_imp)) — no PC required.**
+<img src="fastlane/metadata/android/en-US/images/icon.png" width="96" height="96" alt="Leaf Flasher logo" />
+
+# Leaf Flasher
+
+**Android-to-Android USB OTG Fastboot, FastbootD, `payload.bin` & ADB Sideload flasher — no PC required.**
+
+by **sid_imp** ([GitHub `@devvsid`](https://github.com/devvsid) · [Telegram `@sid_imp`](https://t.me/sid_imp))
+
+<p>
+  <a href="https://github.com/devvsid/LeafFlasher/releases/latest">
+    <img src="https://img.shields.io/github/v/release/devvsid/LeafFlasher?style=for-the-badge&color=10b981&label=Release" alt="Latest Release" />
+  </a>
+  <a href="https://github.com/devvsid/LeafFlasher/actions/workflows/build-and-release.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/devvsid/LeafFlasher/build-and-release.yml?style=for-the-badge&label=CI%20Build&color=22c55e" alt="CI Build" />
+  </a>
+  <a href="https://gitlab.com/fdroid/rfp/-/work_items/4779">
+    <img src="https://img.shields.io/badge/F--Droid-RFP%20%234779-1976D2?style=for-the-badge&logo=f-droid&logoColor=white" alt="F-Droid RFP" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-Apache--2.0-0ea5e9?style=for-the-badge" alt="Apache-2.0 License" />
+  </a>
+  <a href="https://t.me/sid_imp">
+    <img src="https://img.shields.io/badge/Telegram-%40sid__imp-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" />
+  </a>
+</p>
+
+<p>
+  <a href="#-download--verify-apk">Download APK</a> •
+  <a href="#-screenshots">Screenshots</a> •
+  <a href="#-at-a-glance">At a Glance</a> •
+  <a href="#-every-feature-explained">All Features</a> •
+  <a href="#-how-to-use-simple-step-by-step">How to Use</a> •
+  <a href="#-build--verify-from-source">Build From Source</a> •
+  <a href="#-credits--open-source-acknowledgments">Credits</a>
+</p>
+
+</div>
+
+---
 
 Leaf Flasher turns any Android phone into a portable flashing station. Plug a second Android phone in over a USB OTG cable and install custom ROMs, stock firmware folders, full OTA `.zip` packages (`payload.bin`), rooted `boot.img` / `init_boot.img` images, or recovery sideload add-ons like GApps and Magisk straight from your phone.
 
-Designed in a clean dark theme with step-by-step guidance and plain, everyday wording so both experienced modders and first-time flashers always know what is happening at every step.
-
-> **📦 Download Latest APK:** Get the compiled `.apk` and `.sha256` checksum directly from [**GitHub Releases**](https://github.com/devvsid/LeafFlasher/releases/latest) ([All Releases](https://github.com/devvsid/LeafFlasher/releases)) · **💬 Telegram:** [@sid_imp](https://t.me/sid_imp)
+Designed in a clean dark theme with step-by-step guidance and plain, everyday wording so both experienced modders and first-time flashers always know what is happening at every step — **100% offline with zero ads, zero trackers, and no `INTERNET` permission**.
 
 ---
 
-## 📖 Table of Contents
+## 📦 Download & Verify APK
 
-- [Download APK](#-download-apk)
-- [Why Leaf Flasher?](#-why-leaf-flasher)
-- [Every Feature Explained](#-every-feature-explained)
-  - [1. Live USB OTG Detection (Fastboot, FastbootD & ADB)](#1-live-usb-otg-detection-fastboot-fastbootd--adb)
-  - [2. Unified ROM Browser (Phone Storage, Downloads & SD Card)](#2-unified-rom-browser-phone-storage-downloads--sd-card)
-  - [3. High-Speed Parallel payload.bin Extractor](#3-high-speed-parallel-payloadbin-extractor)
-  - [4. Guided 4-Step Flash Setup + Final Check](#4-guided-4-step-flash-setup--final-check)
-  - [5. Pure Focus Mode & Leaves Log Console](#5-pure-focus-mode--leaves-log-console)
-  - [6. Partition Tab (Flash One .img File)](#6-partition-tab-flash-one-img-file)
-  - [7. Sideload Tab (ADB Sideload for Recovery ZIPs)](#7-sideload-tab-adb-sideload-for-recovery-zips)
-  - [8. Tools Tab & Manual Command Runner](#8-tools-tab--manual-command-runner)
-  - [9. Built-In Guide, (i) Help Popups & Adaptive Display](#9-built-in-guide-i-help-popups--adaptive-display)
-- [How to Use (Simple Step-by-Step)](#-how-to-use-simple-step-by-step)
-- [Requirements](#-requirements)
-- [Build & Verify From Source](#-build--verify-from-source)
-- [Credits & Open-Source Acknowledgments](#-credits--open-source-acknowledgments)
-- [Community & License](#-community--license)
+Every release APK is built transparently from source by [GitHub Actions](.github/workflows/build-and-release.yml) and published under [**GitHub Releases**](https://github.com/devvsid/LeafFlasher/releases) alongside its SHA-256 checksum:
 
----
-
-## 📦 Download APK
-
-Pre-built signed APKs are published inside the repository's [**Releases**](https://github.com/devvsid/LeafFlasher/releases) section and built directly from source by GitHub Actions:
-
-- **Latest Release Page:** https://github.com/devvsid/LeafFlasher/releases/latest
+- **Latest Release:** https://github.com/devvsid/LeafFlasher/releases/latest
 - **All Releases:** https://github.com/devvsid/LeafFlasher/releases
 
-Each release includes both `LeafFlasher-by-sid-v<version>.apk` and `LeafFlasher-by-sid-v<version>.apk.sha256` so you can verify file integrity before installing.
+To verify your downloaded APK matches the published checksum:
+
+```bash
+sha256sum -c LeafFlasher-by-sid-v2.0.0.apk.sha256
+```
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="240" alt="Flasher Home" /><br />
+      <b>1. Flasher Home</b><br />
+      <sub>Pick ROM ZIP or folder & view device state</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="240" alt="Unified ROM Browser" /><br />
+      <b>2. ROM & Storage Browser</b><br />
+      <sub>Downloads, Phone Storage & SD Card pills</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="240" alt="Parallel Payload Unpacker" /><br />
+      <b>3. Parallel payload.bin Unpacker</b><br />
+      <sub>Multi-worker extraction with live MB/s</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.png" width="240" alt="ROM Partitions Inspector" /><br />
+      <b>4. ROM Partitions Inspector</b><br />
+      <sub>Bootloader, FastbootD & flash order preview</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.png" width="240" alt="dm-verity Verification Step" /><br />
+      <b>5. Guided 4-Step Setup</b><br />
+      <sub>Slot, Wipe, Extra Files & dm-verity choices</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/6.png" width="240" alt="Final Check Summary" /><br />
+      <b>6. Final Check Summary</b><br />
+      <sub>Review or tap any option before flashing</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/7.png" width="240" alt="Partition Flasher Tab" /><br />
+      <b>7. Partition (.img) Flasher</b><br />
+      <sub>Flash boot, init_boot, recovery or vbmeta</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/8.png" width="240" alt="ADB Sideload Tab" /><br />
+      <b>8. Native ADB Sideload</b><br />
+      <sub>Stream GApps, Magisk & OTA ZIPs in recovery</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/9.png" width="240" alt="Device Tools Tab" /><br />
+      <b>9. Tools & Command Runner</b><br />
+      <sub>Custom commands, reboots, slot & wipe</sub>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+---
+
+## 🔍 At a Glance
+
+| Tab / Area | What It Does |
+| --- | --- |
+| **Flasher** | Opens ROM `.zip` / `payload.bin` packages or extracted folders, inspects partitions, walks through 4 simple setup choices, and flashes cleanly with Bootloader ↔ FastbootD auto-handoff. |
+| **Partition** | Flashes a single `.img` (`boot.img`, `init_boot.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`, etc.) with automatic filename target matching and sparse splitting. |
+| **Sideload** | Native USB ADB + `sideload-host` implementation for flashing GApps, Magisk, KernelSU, and recovery OTA `.zip` files over OTG without external binaries. |
+| **Tools** | Run manual `fastboot` or `adb` commands, jump between System / Bootloader / Fastbootd / Recovery, switch A/B slots manually, or format `userdata`. |
+| **Privacy & Trust** | Built purely in **Kotlin**. Declares **no `INTERNET` permission** in [`AndroidManifest.xml`](app/src/main/AndroidManifest.xml) and contains zero analytics, ads, or remote calls. |
 
 ---
 
@@ -110,7 +202,7 @@ After your ROM finishes loading, Leaf Flasher walks you through four plain-Engli
 
 ### 8. Tools Tab & Manual Command Runner
 - **Command Runner:** Send custom single commands directly to the connected device (for example `getvar all`, `oem device-info`, `getprop ro.product.device`, or `reboot fastboot`) without typing the `fastboot` or `adb` prefix.
-- **Reboot Controls:** Quick 2x2 tiles for **Reboot System**, **Bootloader**, **Fastbootd**, and **Recovery**.
+- **Reboot Controls:** Quick 2×2 tiles for **Reboot System**, **Bootloader**, **Fastbootd**, and **Recovery**.
 - **Set Active Slot:** Switch active boot slot manually between **Slot A** and **Slot B** on A/B devices.
 - **Format Data:** Dedicated crimson action card to wipe `userdata` directly from Fastboot when needed.
 
@@ -126,12 +218,12 @@ After your ROM finishes loading, Leaf Flasher walks you through four plain-Engli
 1. **Prepare your cables & phone:** Connect your host phone (running Leaf Flasher) to your target phone using a USB OTG adapter or USB-C-to-USB-C data cable.
 2. **Put the target phone in the right mode:**
    - **Bootloader / Fastboot mode** to flash full ROMs, Fastboot packages, or single `.img` files (target bootloader must be unlocked).
-   - **Recovery -> Apply update -> Apply from ADB** if you want to sideload GApps, Magisk, or a recovery OTA ZIP.
-3. **Check the top status card:** Wait until it turns **green** (Fastboot / FastbootD) or **blue** (ADB / Recovery Sideload). Tap the refresh button if your system asks for USB permission.
+   - **Recovery → Apply update → Apply from ADB** if you want to sideload GApps, Magisk, or a recovery OTA ZIP.
+3. **Check the top status card:** Wait until it turns **green** (Fastboot / FastbootD) or **blue** (ADB / Recovery Sideload). Tap the refresh button if Android asks for USB permission.
 4. **Follow the on-screen tab:**
-   - **Flasher tab:** Tap **Choose ROM File or Folder** -> pick your `.zip` or folder -> choose **Continue** through the 4 options -> tap **Start Flashing**.
-   - **Partition tab:** Pick one `.img` file -> verify Target Partition -> tap **Flash Partition**.
-   - **Sideload tab:** Pick your `.zip` add-on -> confirm phone is waiting in ADB Sideload -> tap **Start ADB Sideload**.
+   - **Flasher tab:** Tap **Choose ROM File or Folder** → pick your `.zip` or folder → choose **Continue** through the 4 options → tap **Start Flashing**.
+   - **Partition tab:** Pick one `.img` file → verify Target Partition → tap **Flash Partition**.
+   - **Sideload tab:** Pick your `.zip` add-on → confirm phone is waiting in ADB Sideload → tap **Start ADB Sideload**.
 
 > [!CAUTION]
 > Flashing system partitions or wiping data modifies critical device software and permanently erases user files when Clean Flash or Format Data is chosen. Always double-check that your ROM package matches your exact device model and back up important data before flashing.
@@ -140,21 +232,15 @@ After your ROM finishes loading, Leaf Flasher walks you through four plain-Engli
 
 ## 📋 Requirements
 
-- **Host Device (running Leaf Flasher):**
-  - Android 7.0 (API 24) or higher
-  - Hardware USB Host / USB OTG support
-- **Connection:**
-  - Data-capable USB OTG adapter + cable, or USB-C to USB-C data cable
-- **Target Device (being flashed):**
-  - Unlocked bootloader (for Fastboot / FastbootD flashing)
+- **Host Device (running Leaf Flasher):** Android 7.0 (API 24) or higher with hardware USB Host / USB OTG support
+- **Connection:** Data-capable USB OTG adapter + cable, or USB-C to USB-C data cable
+- **Target Device (being flashed):** Unlocked bootloader for Fastboot / FastbootD flashing
 
 ---
 
 ## 🔨 Build & Verify From Source
 
-Every official APK attached to GitHub Releases in this repository is compiled cleanly from this exact source tree using the workflow at [`.github/workflows/build-and-release.yml`](.github/workflows/build-and-release.yml) and ships with a matching `.sha256` checksum file.
-
-To test and build the APK yourself locally:
+Every official APK attached to GitHub Releases in this repository is compiled cleanly from this exact source tree using [`.github/workflows/build-and-release.yml`](.github/workflows/build-and-release.yml) and verified against the pinned Gradle wrapper checksum in [`gradle/wrapper/gradle-wrapper.properties`](gradle/wrapper/gradle-wrapper.properties).
 
 ```bash
 # 1. Clone the repository
@@ -179,7 +265,7 @@ The compiled release APK is output to:
 
 On Windows PowerShell, use `.\gradlew.bat testDebugUnitTest assembleRelease`.
 
-*(F-Droid / IzzyOnDroid support: `dependenciesInfo` is disabled in [`app/build.gradle.kts`](app/build.gradle.kts), store metadata is included under `fastlane/metadata/android/en-US/`, and optional release signing never blocks clean `./gradlew assembleRelease` source builds.)*
+*(F-Droid readiness: `dependenciesInfo` is disabled in [`app/build.gradle.kts`](app/build.gradle.kts), store metadata and screenshots live under [`fastlane/metadata/android/en-US/`](fastlane/metadata/android/en-US/), and F-Droid RFP tracking is open at [fdroid/rfp#4779](https://gitlab.com/fdroid/rfp/-/work_items/4779).)*
 
 ---
 
@@ -205,6 +291,7 @@ Leaf Flasher is built on top of open standards and open-source software from the
 - **Developer:** `sid_imp`
 - **Telegram:** [@sid_imp](https://t.me/sid_imp)
 - **GitHub:** [@devvsid](https://github.com/devvsid)
+- **F-Droid RFP:** [fdroid/rfp#4779](https://gitlab.com/fdroid/rfp/-/work_items/4779)
 
 Copyright © 2026 **sid_imp**
 
