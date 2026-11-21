@@ -435,6 +435,7 @@ fun DeviceControlScreen(
                 isExpanded = isLogExpanded,
                 onToggleExpanded = { viewModel.toggleLogExpanded() },
                 onClearLogs = { viewModel.clearLogs() },
+                onShareLog = { viewModel.shareLogFile() },
                 consoleHeight = metrics.consoleDefaultHeightDp.dp
             )
 

@@ -366,6 +366,7 @@ fun AdbSideloadScreen(
                 isExpanded = isLogExpanded,
                 onToggleExpanded = { viewModel.toggleLogExpanded() },
                 onClearLogs = { viewModel.clearLogs() },
+                onShareLog = { viewModel.shareLogFile() },
                 consoleHeight = if (useFullScreenFocus) {
                     (availableHeight * 0.45f).coerceIn(140.dp, 360.dp)
                 } else {

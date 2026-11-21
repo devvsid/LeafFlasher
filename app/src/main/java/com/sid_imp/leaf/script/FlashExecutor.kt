@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.sid_imp.leaf.fastboot.*
+import com.sid_imp.leaf.util.LeafLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,7 +58,7 @@ class FlashExecutor(
     @Volatile private var isCancelled = false
 
     companion object {
-        private const val MAX_LOG_LINES = 250
+        private const val MAX_LOG_LINES = 5000
         private const val PROGRESS_EMIT_INTERVAL_MS = 65L
         private val KNOWN_LOGICAL_STEMS = setOf(
             "odm_dlkm", "odm", "vendor_dlkm", "product", "vendor",
@@ -105,6 +106,7 @@ class FlashExecutor(
             .replace(Regex("\\s+"), " ")
             .trim()
         if (clean.isEmpty()) return
+        LeafLogger.log(clean)
         synchronized(logLock) {
             val current = _logFlow.value
             if (current.lastOrNull() == clean) return
@@ -246,6 +248,7 @@ class FlashExecutor(
             )
 
             var success = true
+            var logicalPartitionsPreResetDone = false
 
             for (index in tasks.indices) {
                 if (isCancelled) {
@@ -413,6 +416,41 @@ class FlashExecutor(
                             // logical resize/create and snapshot commands must not run there.
                             val isLogical = fastbootdSupported && isLogicalTarget
 
+                            // Prior to flashing any logical partition, pre-reset all logical partitions in this
+                            // script to 0 (and delete opposite slot partitions) to maximize contiguous super space,
+                            // matching Google AOSP fastboot AddResizeTasks behavior.
+                            if (isLogical && !logicalPartitionsPreResetDone) {
+                                logicalPartitionsPreResetDone = true
+                                val activeSlot = liveSlotCache
+                                    ?: activeDevice.getVariable("current-slot")?.lowercase()?.takeIf { it == "a" || it == "b" }
+                                    ?: "a"
+                                val oppSlot = if (activeSlot == "a") "b" else "a"
+
+                                activeDevice.sendCommand("snapshot-update:cancel")
+
+                                for (stem in KNOWN_LOGICAL_STEMS) {
+                                    activeDevice.sendCommand("delete-logical-partition:${stem}_$oppSlot")
+                                }
+
+                                val scriptLogicalStems = tasks.asSequence()
+                                    .filter { it.type == TaskType.FLASH && (it.phase == FlashingPhase.LOGICAL_DYNAMIC || isLogicalPartitionTarget(it.partition.ifBlank { it.fileName })) }
+                                    .map { FlashScriptParser.normalizePartitionStem(it.partition.ifBlank { it.fileName }) }
+                                    .filter { it in KNOWN_LOGICAL_STEMS }
+                                    .distinct()
+                                    .toList()
+
+                                for (stem in scriptLogicalStems) {
+                                    val target = "${stem}_$activeSlot"
+                                    val r = activeDevice.sendCommand("resize-logical-partition:$target:0")
+                                    if (!r.isSuccess) {
+                                        val p = r.payload.lowercase()
+                                        if (p.contains("not found") || p.contains("does not exist") || p.contains("no such")) {
+                                            activeDevice.sendCommand("create-logical-partition:$target:0")
+                                        }
+                                    }
+                                }
+                            }
+
                             addLog("Flashing $initialTarget...")
 
                             var targetPartitionSize = source.sizeBytes
@@ -430,7 +468,7 @@ class FlashExecutor(
                                 }
                                 targetPartitionSize = SparseChunkHelper.computeTargetPartitionSize(headerBytes, source.sizeBytes)
 
-                                val resizeResp = activeDevice.sendCommand("resize-logical-partition:$initialTarget:$targetPartitionSize")
+                                var resizeResp = activeDevice.sendCommand("resize-logical-partition:$initialTarget:$targetPartitionSize")
                                 if (!resizeResp.isSuccess) {
                                     val payload = resizeResp.payload.lowercase()
                                     if (payload.contains("lock") || payload.contains("not allowed")) {
@@ -444,8 +482,18 @@ class FlashExecutor(
                                                payload.contains("no such") ||
                                                payload.contains("unknown partition") ||
                                                payload.contains("failed to find")) {
-                                        val createResp = activeDevice.sendCommand("create-logical-partition:$initialTarget:$targetPartitionSize")
-                                        if (!createResp.isSuccess && (createResp.payload.contains("lock", ignoreCase = true) || createResp.payload.contains("not allowed", ignoreCase = true))) {
+                                        var createResp = activeDevice.sendCommand("create-logical-partition:$initialTarget:$targetPartitionSize")
+                                        if (!createResp.isSuccess) {
+                                            val cPayload = createResp.payload.lowercase()
+                                            if (cPayload.contains("no space") || cPayload.contains("not enough space")) {
+                                                val oppSlot = if (initialTarget.endsWith("_a")) "b" else "a"
+                                                for (stem in KNOWN_LOGICAL_STEMS) {
+                                                    activeDevice.sendCommand("delete-logical-partition:${stem}_$oppSlot")
+                                                }
+                                                createResp = activeDevice.sendCommand("create-logical-partition:$initialTarget:$targetPartitionSize")
+                                            }
+                                        }
+                                        if (!createResp.isSuccess) {
                                             task.status = TaskStatus.FAILED
                                             task.errorMessage = createResp.payload
                                             addLog("✗ Failed $initialTarget: ${createResp.payload}")
@@ -454,10 +502,27 @@ class FlashExecutor(
                                         }
                                     } else if (payload.contains("no space") || payload.contains("not enough space")) {
                                         val oppSlot = if (initialTarget.endsWith("_a")) "b" else "a"
-                                        for (stem in listOf("product", "system_ext", "system", "vendor", "vendor_dlkm", "odm_dlkm", "odm")) {
+                                        for (stem in KNOWN_LOGICAL_STEMS) {
                                             activeDevice.sendCommand("delete-logical-partition:${stem}_$oppSlot")
                                         }
-                                        activeDevice.sendCommand("resize-logical-partition:$initialTarget:$targetPartitionSize")
+                                        resizeResp = activeDevice.sendCommand("resize-logical-partition:$initialTarget:$targetPartitionSize")
+                                        if (!resizeResp.isSuccess) {
+                                            activeDevice.sendCommand("delete-logical-partition:$initialTarget")
+                                            resizeResp = activeDevice.sendCommand("create-logical-partition:$initialTarget:$targetPartitionSize")
+                                        }
+                                        if (!resizeResp.isSuccess) {
+                                            task.status = TaskStatus.FAILED
+                                            task.errorMessage = resizeResp.payload
+                                            addLog("✗ Failed $initialTarget: ${resizeResp.payload}")
+                                            success = false
+                                            break
+                                        }
+                                    } else {
+                                        task.status = TaskStatus.FAILED
+                                        task.errorMessage = resizeResp.payload
+                                        addLog("✗ Failed $initialTarget: ${resizeResp.payload}")
+                                        success = false
+                                        break
                                     }
                                 }
                             }

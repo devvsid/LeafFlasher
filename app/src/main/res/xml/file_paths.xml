@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="shared_logs" path="shared_logs/" />
+    <cache-path name="cache_root" path="." />
+    <external-files-path name="ext_logs" path="logs/" />
+    <external-files-path name="ext_files" path="." />
+    <external-path name="external_storage" path="." />
+</paths>

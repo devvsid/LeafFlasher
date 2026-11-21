@@ -714,6 +714,7 @@ fun PartitionFlasherScreen(
                 isExpanded = isLogExpanded,
                 onToggleExpanded = { viewModel.toggleLogExpanded() },
                 onClearLogs = { viewModel.clearLogs() },
+                onShareLog = { viewModel.shareLogFile() },
                 consoleHeight = if (useFullScreenFocus) {
                     (availableHeight * 0.50f).coerceIn(140.dp, 380.dp)
                 } else {

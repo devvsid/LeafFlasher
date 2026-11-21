@@ -913,6 +913,39 @@ fun ScriptFlasherScreen(
                             color = OneUiMint
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = metrics.actionPillMinHeightDp.dp)
+                            .clip(CircleShape)
+                            .background(OneUiEmerald.copy(alpha = 0.16f))
+                            .oneUiBounceClick(pressedScale = 0.97f) {
+                                viewModel.shareLogFile()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = null,
+                                tint = OneUiEmerald,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Send Diagnostic Log to Telegram",
+                                fontFamily = IosRoundedFontFamily,
+                                fontSize = metrics.bodySp.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = OneUiEmerald
+                            )
+                        }
+                    }
                 }
             }
 
@@ -924,6 +957,7 @@ fun ScriptFlasherScreen(
                 isExpanded = isLogExpanded,
                 onToggleExpanded = { viewModel.toggleLogExpanded() },
                 onClearLogs = { viewModel.clearLogs() },
+                onShareLog = { viewModel.shareLogFile() },
                 consoleHeight = if (useFullScreenFocus) {
                     (availableHeight * 0.44f).coerceIn(140.dp, 340.dp)
                 } else {

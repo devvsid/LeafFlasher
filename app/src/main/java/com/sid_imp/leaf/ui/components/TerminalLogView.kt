@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -43,6 +44,7 @@ fun LeavesConsoleCard(
     isExpanded: Boolean,
     onToggleExpanded: () -> Unit,
     onClearLogs: () -> Unit,
+    onShareLog: () -> Unit = {},
     consoleHeight: Dp? = null,
     fillAvailableHeight: Boolean = false,
     modifier: Modifier = Modifier
@@ -135,6 +137,22 @@ fun LeavesConsoleCard(
                         imageVector = Icons.Default.ContentCopy,
                         contentDescription = "Copy logs",
                         tint = OneUiMint,
+                        modifier = Modifier.size((metrics.badgeSmallSizeDp * 0.48f).dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(actionBtnSize)
+                        .clip(CircleShape)
+                        .background(OneUiInnerTile)
+                        .oneUiBounceClick(pressedScale = 0.90f, onClick = onShareLog),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Send log file to Telegram / App",
+                        tint = OneUiEmerald,
                         modifier = Modifier.size((metrics.badgeSmallSizeDp * 0.48f).dp)
                     )
                 }
